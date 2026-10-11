@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# Runtime state / debug artifacts
+.fb_pfp_state.json
+step*.png
+dry_run_state.png
+after_save.png
+failure_state.png
+not_logged_in.png
+
+# macOS
+.DS_Store
