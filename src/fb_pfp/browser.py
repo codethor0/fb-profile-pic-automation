@@ -43,15 +43,28 @@ def _app_name(binary: Path) -> str:
     return "Brave Browser"
 
 
-def _cdp_alive(cdp_url: str) -> bool:
-    """True if a DevTools endpoint answers on the local ``cdp_url``."""
+def _cdp_probe(cdp_url: str) -> str | None:
+    """Return the ``Browser`` version string if a DevTools endpoint answers.
+
+    The string is logged so the user can see *which* browser answered the
+    port (audit finding F03: an open port alone does not prove it is Brave).
+    """
     try:
         # cdp_url is always http://127.0.0.1:<int port> (Settings.cdp_url).
         with urllib.request.urlopen(f"{cdp_url}/json/version", timeout=1) as resp:  # nosec B310
-            return resp.status == 200
+            if resp.status != 200:
+                return None
+            import json
+
+            return str(json.loads(resp.read()).get("Browser", "?"))
     except (OSError, ValueError) as exc:
         logger.debug("No DevTools endpoint answering on %s: %s", cdp_url, exc)
-        return False
+        return None
+
+
+def _cdp_alive(cdp_url: str) -> bool:
+    """True if a DevTools endpoint answers on the local ``cdp_url``."""
+    return _cdp_probe(cdp_url) is not None
 
 
 def _brave_running(binary: Path) -> bool:
@@ -105,16 +118,23 @@ def _launch_brave(settings: Settings) -> None:
     )
 
 
-def ensure_brave(settings: Settings) -> None:
+def ensure_brave(settings: Settings) -> str:
     """Guarantee a Brave instance with a live CDP debug port.
 
     - If a debug session already answers on the port, reuse it.
     - Otherwise quit Brave if it is running, relaunch it with the debug port,
       and wait for the port to come alive.
+
+    Returns:
+        ``"reused"`` when an existing session answered (the tool does not own
+        that browser and must not shut it down), or ``"launched"`` when this
+        call started Brave (the caller should shut it down after the run,
+        unless ``settings.keep_brave_open``).
     """
-    if _cdp_alive(settings.cdp_url):
-        logger.info("Reusing existing Brave debug session on port %d", settings.debug_port)
-        return
+    answering = _cdp_probe(settings.cdp_url)
+    if answering is not None:
+        logger.info("Reusing existing debug session on port %d (%s)", settings.debug_port, answering)
+        return "reused"
 
     if _brave_running(settings.brave_binary):
         logger.info("Brave is open without the debug port; restarting it gracefully")
@@ -127,9 +147,25 @@ def ensure_brave(settings: Settings) -> None:
     while time.monotonic() < deadline:
         if _cdp_alive(settings.cdp_url):
             logger.info("Brave debug port is live")
-            return
+            return "launched"
         time.sleep(0.5)
     raise BrowserError(
         f"Brave did not open a debug port within {_LAUNCH_TIMEOUT_S:.0f}s "
         "(updating, blocked, or wrong profile path?)"
     )
+
+
+def shutdown_brave(settings: Settings, mode: str) -> None:
+    """Close the debug-enabled browser after a run, but only if we launched it.
+
+    Never touches a browser the user already had running (audit finding F04:
+    do not silently kill the user's main browser). Best effort: a failure to
+    quit is logged, never raised.
+    """
+    if mode != "launched" or settings.keep_brave_open:
+        return
+    try:
+        logger.info("Run finished; quitting the Brave instance this run started")
+        _quit_brave_gracefully(settings.brave_binary)
+    except Exception as exc:  # cleanup must never fail the run
+        logger.warning("Could not quit Brave after the run: %s", exc)

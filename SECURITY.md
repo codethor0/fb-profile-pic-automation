@@ -27,14 +27,17 @@ While Brave runs with `--remote-debugging-port`, any program on your Mac can con
 To limit the risk:
 
 - Keep the port on `localhost`. Never expose it to a network.
-- Do not leave a debug-enabled Brave running all day if you can avoid it. Let the tool start Brave for the run, then quit Brave.
+- When the tool starts Brave for a run, it quits Brave when the run finishes, so the port is closed again. Set `FB_PFP_KEEP_BRAVE_OPEN=1` only if you want the debug session to persist.
+- Do not leave a debug-enabled Brave running all day if you can avoid it.
 - Treat an unknown program connecting to port 9222 as a sign of compromise.
 - Use a separate Brave profile for this tool if you want to keep other logins out of reach.
+- Set `FB_PFP_EXPECTED_NAME` to your Facebook display name. The run then verifies the browser's logged-in account before changing anything, and refuses to act on a different account.
 
 ## What a run writes to disk
 
-- `~/.fb_pfp/state.json`: image file names already used (only with `--cycle`).
-- `~/.fb_pfp/screenshots/`: screenshots of your Facebook page. They are written only with `-v` or when a run fails. Delete them when you are done. They are excluded from git.
+- `~/.fb_pfp/state.json`: image file names already used (only with `--cycle`). Written with private permissions (directory `0700`).
+- `~/.fb_pfp/screenshots/`: screenshots of your Facebook page, written with mode `0600`. They are written only with `-v` or when a run fails. Delete them when you are done debugging; they are excluded from git and should not be kept around.
+- `~/.fb_pfp/run.lock`: an empty lock file that serializes overlapping runs.
 
 ## Terms of service
 

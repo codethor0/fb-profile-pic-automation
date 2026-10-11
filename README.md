@@ -91,6 +91,10 @@ Command-line options override `FB_PFP_*` environment variables, which override t
 | `FB_PFP_LOCALE` | Browser language, passed as `--lang` when this tool starts Brave | `en-US` |
 | `FB_PFP_STATE_FILE` | Rotation state for `--cycle` | `~/.fb_pfp/state.json` |
 | `FB_PFP_SCREENSHOT_DIR` | Where screenshots go | `~/.fb_pfp/screenshots` |
+| `FB_PFP_EXPECTED_NAME` | Your Facebook display name. When set, the run refuses to act unless the browser shows this account (guards against attaching to the wrong browser or account) | none: a warning is logged |
+| `FB_PFP_KEEP_BRAVE_OPEN` | Set to `1` to leave the debug-enabled Brave running after a run the tool started | browser is quit after the run |
+
+When the tool starts Brave itself, it quits Brave again when the run finishes, so the debug port is not left open. A Brave you already had running is never quit. `run.sh` is unaffected by this.
 
 `FB_PFP_PYTHON` is not read by `fb-pfp` itself: `run.sh` uses it to pick the Python interpreter (for example the one inside a virtual environment), defaulting to `python3`. See [docs/scheduling.md](docs/scheduling.md).
 

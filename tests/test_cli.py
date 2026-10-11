@@ -9,6 +9,7 @@ import pytest
 
 from fb_pfp import cli
 from fb_pfp.automator import AutomatorError
+from fb_pfp.config import Settings
 
 
 @pytest.fixture()
@@ -145,3 +146,42 @@ def test_cycle_with_file_warns_and_ignores(
     monkeypatch.setattr(cli, "FacebookPfpAutomator", _OkAutomator)
     assert cli.main(["--file", str(img), "--cycle"]) == 0
     assert "--cycle has no effect with --file" in caplog.text
+
+
+def test_overlapping_run_rejected_with_lock_held(
+    env, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture[str]
+) -> None:
+    """F07: a second run while the run lock is held exits 1 with a message."""
+    import fcntl
+    import os
+
+    pics, state = env
+    state.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(state.with_name("run.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        assert cli.main(["--dir", str(pics)]) == 1
+        assert "already in progress" in caplog.text
+    finally:
+        os.close(fd)
+
+
+def test_ensure_brave_shuts_down_only_what_it_launched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """F04: shutdown is a no-op for reused sessions and opted-in keeps."""
+    from fb_pfp import browser
+
+    calls: list[str] = []
+    monkeypatch.setattr(browser, "_quit_brave_gracefully", lambda binary: calls.append("quit"))
+    settings = Settings(source_kind="directory", image_dir=tmp_path)
+
+    browser.shutdown_brave(settings, "reused")
+    assert calls == []  # never kill the user's own browser
+
+    browser.shutdown_brave(settings, "launched")
+    assert calls == ["quit"]  # we started it, we close it
+
+    settings_keep = Settings(source_kind="directory", image_dir=tmp_path, keep_brave_open=True)
+    browser.shutdown_brave(settings_keep, "launched")
+    assert calls == ["quit"]  # opt-out honored, no second quit

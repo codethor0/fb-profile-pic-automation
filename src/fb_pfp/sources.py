@@ -1,13 +1,14 @@
 """Image sources.
 
-An image source answers one question: "which picture should become the profile
-picture right now?" Implement :class:`ImageSource` to add new strategies, for
-example, picking from photos already uploaded to Facebook instead of local
-files. The automator does not care where the image came from.
+An image source answers one question: "which local picture should become the
+profile picture right now?" Implement :class:`ImageSource` to add new picking
+strategies for local files. Sources that keep rotation state may additionally
+implement :class:`RecordsSuccess`; the CLI calls it only after Facebook
+accepted the picture, so a failed run never consumes an image.
 
-Sources that keep rotation state may additionally implement
-:class:`RecordsSuccess`; the CLI calls it only after Facebook accepted the
-picture, so a failed run never consumes an image.
+Note: picking photos already hosted on Facebook is *not* just another
+ImageSource; it needs a different automation action (clicking existing photos
+in the dialog) and a richer interface. The built-in sources are local files.
 """
 
 from __future__ import annotations
@@ -132,6 +133,10 @@ class DirectorySource:
         mid-write, or a power loss, cannot leave a torn JSON file behind."""
         parent = self._state_file.parent
         parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(parent, 0o700)  # state names reveal usage patterns (F10)
+        except OSError:
+            pass
         payload = json.dumps({"used": sorted(used)}).encode("utf-8")
         fd, tmp_name = tempfile.mkstemp(dir=str(parent), prefix=".fb_pfp_")
         try:

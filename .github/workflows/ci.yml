@@ -16,10 +16,10 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -35,9 +35,9 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -47,12 +47,18 @@ jobs:
       - name: Static security scan (medium severity and above)
         run: bandit -q -r src -ll
 
+      - name: Dependency advisory check
+        run: |
+          pip install pip-audit
+          pip-audit --requirement requirements.txt
+          pip-audit --requirement requirements-dev.txt
+
   text:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -62,9 +68,9 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -72,3 +78,17 @@ jobs:
         run: |
           pip install build
           python -m build
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Reject media and archives outside docs/assets
+        run: |
+          offenders=$(git ls-files | grep -iE '\.(jpg|jpeg|webp|heic|gif|mp4|mov|zip|tar|gz|pdf)$' | grep -v '^docs/assets/') || true
+          if [ -n "$offenders" ]; then
+            echo "Media/archive files are only allowed under docs/assets/:"
+            echo "$offenders"
+            exit 1
+          fi

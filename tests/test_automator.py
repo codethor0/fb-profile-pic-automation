@@ -129,3 +129,73 @@ def test_avatar_falls_back_to_first_match(tmp_path: Path) -> None:
 
     page2 = _FakeAvatarPage(exact=_FakeLocator(raises=True), loose=_FakeLocator())
     assert a._avatar(page2) is page2._loose  # type: ignore[arg-type]
+
+
+class _TitledPage(_Page):
+    """Adds title() and url for account-verification tests."""
+
+    def __init__(self, title: str, url: str = "https://www.facebook.com/me") -> None:
+        super().__init__()
+        self._title = title
+        self.url = url
+
+    def title(self) -> str:
+        return self._title
+
+
+def test_account_verified_when_expected_name_matches(tmp_path: Path) -> None:
+    a = FacebookPfpAutomator(_settings(tmp_path, verify_account_name="Ada Lovelace"))
+    page = _TitledPage("Ada Lovelace | Facebook")
+    a._verify_account(page)  # type: ignore[arg-type] - must not raise
+
+
+def test_account_refused_when_title_shows_other_account(tmp_path: Path) -> None:
+    import pytest
+
+    from fb_pfp.automator import AutomatorError
+
+    a = FacebookPfpAutomator(_settings(tmp_path, verify_account_name="Ada Lovelace"))
+    page = _TitledPage("Someone Else | Facebook")
+    with pytest.raises(AutomatorError, match="different account"):
+        a._verify_account(page)  # type: ignore[arg-type]
+
+
+def test_account_check_skipped_without_expected_name(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture[str]
+) -> None:
+    a = FacebookPfpAutomator(_settings(tmp_path))
+    a._verify_account(_TitledPage("Anyone | Facebook"))  # type: ignore[arg-type]
+    assert "cannot verify" in caplog.text
+
+
+def test_normalize_src_strips_query_string() -> None:
+    assert FacebookPfpAutomator._normalize_src("https://cdn.example.com/a.jpg?x=1") == (
+        "https://cdn.example.com/a.jpg"
+    )
+    assert FacebookPfpAutomator._normalize_src(None) is None
+    assert FacebookPfpAutomator._normalize_src("") is None
+
+
+def test_picture_changed_refused_when_avatar_unchanged(tmp_path: Path) -> None:
+    """F06: a closed dialog with the same avatar is a failure, not a success."""
+    import pytest
+
+    from fb_pfp.automator import AutomatorError
+
+    a = FacebookPfpAutomator(_settings(tmp_path))
+    a._avatar_src = lambda page: "https://cdn.example.com/old.jpg?v=2"  # type: ignore[method-assign]
+    page = _Page()
+    with pytest.raises(AutomatorError, match="previous avatar"):
+        a._verify_picture_changed(page, "https://cdn.example.com/old.jpg?v=1")
+
+
+def test_picture_changed_passes_when_avatar_differs(tmp_path: Path) -> None:
+    a = FacebookPfpAutomator(_settings(tmp_path))
+    a._avatar_src = lambda page: "https://cdn.example.com/new.jpg"  # type: ignore[method-assign]
+    a._verify_picture_changed(_Page(), "https://cdn.example.com/old.jpg")  # must not raise
+
+
+def test_picture_changed_skipped_when_src_unreadable(tmp_path: Path) -> None:
+    a = FacebookPfpAutomator(_settings(tmp_path))
+    a._avatar_src = lambda page: None  # type: ignore[method-assign]
+    a._verify_picture_changed(_Page(), "https://cdn.example.com/old.jpg")  # must not raise

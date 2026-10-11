@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Iterator
 
 from . import __version__
 from .automator import AutomatorError, FacebookPfpAutomator
-from .browser import BrowserError, ensure_brave
+from .browser import BrowserError, ensure_brave, shutdown_brave
 from .config import ConfigError, Settings, build_settings
 from .sources import (
     DirectorySource,
@@ -17,6 +21,11 @@ from .sources import (
     SingleFileSource,
     SourceError,
 )
+
+try:  # POSIX only; the tool targets macOS, other platforms skip locking
+    import fcntl
+except ImportError:  # pragma: no cover - non-POSIX
+    fcntl = None  # type: ignore[assignment]
 
 logger = logging.getLogger("fb_pfp")
 
@@ -66,6 +75,31 @@ def _build_source(settings: Settings) -> ImageSource:
     )
 
 
+@contextmanager
+def _run_lock(state_file: Path) -> Iterator[None]:
+    """Serialize whole runs so overlapping runs cannot pick the same image.
+
+    Audit finding F07: the state-file lock in DirectorySource protects state
+    integrity, but pick() itself was unlocked; two overlapping runs could pick
+    the same fresh image before either recorded success. A single exclusive
+    lock around the entire run (selection, upload, state commit) is the simple
+    correct fix. Second concurrent run exits with a clear message.
+    """
+    if fcntl is None:  # pragma: no cover - non-POSIX
+        yield
+        return
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(state_file.with_name("run.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise SourceError("another fb-pfp run is already in progress") from None
+        yield
+    finally:
+        os.close(fd)  # closing releases the lock
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the tool.
 
@@ -81,17 +115,23 @@ def main(argv: list[str] | None = None) -> int:
         if settings.source_kind == "file" and settings.cycle:
             logger.warning("--cycle has no effect with --file; ignoring it")
         source = _build_source(settings)
-        image = source.pick()
-        ensure_brave(settings)
-        FacebookPfpAutomator(settings).run(image)
-        if isinstance(source, RecordsSuccess) and not settings.dry_run:
+        with _run_lock(settings.state_file):
+            image = source.pick()
+            mode = ensure_brave(settings)
             try:
-                source.record_success(image)
-            except Exception as exc:
-                # The picture IS changed; only the rotation note failed. Exit 0
-                # on purpose: exit 1 would make a scheduler rerun and change
-                # the public picture a second time.
-                logger.warning("Picture changed, but rotation state was not saved: %s", exc)
+                FacebookPfpAutomator(settings).run(image)
+            finally:
+                # Close the debug-enabled browser only when this run started it
+                # (F04); a pre-existing browser is never killed.
+                shutdown_brave(settings, mode)
+            if isinstance(source, RecordsSuccess) and not settings.dry_run:
+                try:
+                    source.record_success(image)
+                except Exception as exc:
+                    # The picture IS changed; only the rotation note failed. Exit 0
+                    # on purpose: exit 1 would make a scheduler rerun and change
+                    # the public picture a second time.
+                    logger.warning("Picture changed, but rotation state was not saved: %s", exc)
     except KeyboardInterrupt:
         logger.error("Interrupted")
         return 130

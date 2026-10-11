@@ -21,6 +21,7 @@ tests) work without the browser dependency installed.
 from __future__ import annotations
 
 import logging
+import os
 import random
 import re
 import time
@@ -51,6 +52,14 @@ NEXT_BUTTON_PATTERNS = [(r"^select photo$", "Select photo"), (r"^next$", "Next")
 
 class AutomatorError(RuntimeError):
     """Raised when the Facebook flow cannot be completed."""
+
+
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    """Apply private permissions; never fatal (F10 hardening)."""
+    try:
+        os.chmod(path, mode)
+    except OSError as exc:
+        logger.debug("chmod %o on %s failed: %s", mode, path, exc)
 
 
 def _is_login_redirect(url: str) -> bool:
@@ -93,7 +102,10 @@ class FacebookPfpAutomator:
             return
         try:
             self._screens.mkdir(parents=True, exist_ok=True)
-            page.screenshot(path=str(self._screens / name), full_page=False)
+            _chmod_best_effort(self._screens, 0o700)  # screenshots show your Facebook page (F10)
+            path = self._screens / name
+            page.screenshot(path=str(path), full_page=False)
+            _chmod_best_effort(path, 0o600)
         except Exception as exc:  # screenshots are diagnostic, never fatal
             logger.warning("Could not save screenshot %s: %s", name, exc)
 
@@ -161,14 +173,17 @@ class FacebookPfpAutomator:
             page = ctx.new_page()
             try:
                 self._open_profile(page)
+                self._verify_account(page)
                 dialog = self._open_upload_dialog(page)
                 self._upload(page, dialog, image)
                 if self._settings.dry_run:
                     self._shot(page, "dry_run_state.png")
                     logger.info("--dry-run: stopping before Save")
                     return
+                before_src = self._avatar_src(page)
                 self._save(page, dialog)
                 self._confirm(page, dialog)
+                self._verify_picture_changed(page, before_src)
             finally:
                 # Only close our own tab. Never browser.close(): on a CDP
                 # connection that kills the user's entire Brave session.
@@ -191,6 +206,69 @@ class FacebookPfpAutomator:
                 "Facebook is asking to log in (or showing a checkpoint). "
                 "log in inside Brave, then rerun."
             )
+
+    def _verify_account(self, page: "Page") -> None:
+        """Fail closed unless the connected browser shows the expected account.
+
+        Audit finding F03: an open debug port does not prove *which* browser or
+        account we are about to change. When ``FB_PFP_EXPECTED_NAME`` is set,
+        the profile page title must contain it (Facebook titles read
+        "Name | Facebook"). When unset, we warn and continue.
+        """
+        expected = self._settings.verify_account_name
+        try:
+            title = page.title()
+        except Exception as exc:
+            raise self._fail(page, f"Could not read the profile page title: {exc}") from exc
+        if not expected:
+            logger.warning(
+                "FB_PFP_EXPECTED_NAME is not set; this run cannot verify which "
+                "Facebook account the browser is logged into."
+            )
+            return
+        if expected.casefold() not in title.casefold():
+            self._shot(page, "wrong_account.png", force=True)
+            raise AutomatorError(
+                f"The connected browser shows a different account than expected "
+                f"({expected!r}; page title: {title!r}). Refusing to change an "
+                "unverified account's profile picture."
+            )
+        logger.info("Verified the profile name matches FB_PFP_EXPECTED_NAME")
+
+    def _avatar_src(self, page: "Page") -> str | None:
+        """Current avatar image URL, or None when it cannot be read."""
+        try:
+            return self._avatar(page).get_attribute("src")
+        except Exception as exc:
+            logger.debug("Could not read the avatar src: %s", exc)
+            return None
+
+    @staticmethod
+    def _normalize_src(src: str | None) -> str | None:
+        """Drop the query string: CDN parameters vary, the path identifies the image."""
+        if not src:
+            return None
+        return src.split("?", 1)[0]
+
+    def _verify_picture_changed(self, page: "Page", before_src: str | None) -> None:
+        """Require the profile to actually show a new avatar after Save.
+
+        Audit finding F06: a closed dialog does not prove the change persisted.
+        Skipped when either src is unreadable (better a quiet pass than a false
+        failure on a transient read error).
+        """
+        after_src = self._normalize_src(self._avatar_src(page))
+        before = self._normalize_src(before_src)
+        if before is None or after_src is None:
+            logger.debug("Avatar src unreadable; skipping post-save visual check")
+            return
+        if after_src == before:
+            raise self._fail(
+                page,
+                "The profile page still shows the previous avatar after Save; "
+                "the change did not persist.",
+            )
+        logger.info("Verified the profile page shows a new avatar after Save")
 
     def _avatar(self, page: "Page") -> "Locator":
         """The user's own cover avatar.

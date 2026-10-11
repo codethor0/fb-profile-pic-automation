@@ -42,6 +42,11 @@ class Settings:
     brave_profile: Path = DEFAULT_BRAVE_PROFILE
     debug_port: int = DEFAULT_PORT
     locale: str = DEFAULT_LOCALE
+    # Expected Facebook display name, verified before any change is made
+    # (audit finding F03: never act on an unverified account). Set
+    # FB_PFP_EXPECTED_NAME to enforce; unset logs a warning and continues.
+    verify_account_name: str | None = None
+    keep_brave_open: bool = False
     state_file: Path = field(default_factory=lambda: DEFAULT_DATA_DIR / "state.json")
     screenshot_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR / "screenshots")
     debug_screenshots: bool = False
@@ -136,6 +141,8 @@ def build_settings(args: object) -> Settings:
         brave_profile=_env_path("FB_PFP_BRAVE_PROFILE") or DEFAULT_BRAVE_PROFILE,
         debug_port=_env_port(),
         locale=os.environ.get("FB_PFP_LOCALE", DEFAULT_LOCALE),
+        verify_account_name=os.environ.get("FB_PFP_EXPECTED_NAME") or None,
+        keep_brave_open=os.environ.get("FB_PFP_KEEP_BRAVE_OPEN", "") not in ("", "0", "false"),
         state_file=_env_path("FB_PFP_STATE_FILE") or DEFAULT_DATA_DIR / "state.json",
         screenshot_dir=_env_path("FB_PFP_SCREENSHOT_DIR") or DEFAULT_DATA_DIR / "screenshots",
         debug_screenshots=bool(getattr(args, "verbose", False)),

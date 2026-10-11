@@ -12,5 +12,15 @@ dist/
 *.png
 !docs/assets/social-preview.png
 
+# Personal images and local config must never be committed (F05):
+# the default image source is ./profile_pics, which can live inside a clone.
+/profile_pics/
+/.env
+/.fb_pfp/
+/*.jpg
+/*.jpeg
+/*.webp
+/*.heic
+
 # macOS
 .DS_Store

@@ -2,6 +2,29 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org/).
 
+## [1.0.2] - 2026-10-11
+
+Third independent audit (12 findings); all resolved.
+
+### Security
+
+- `FB_PFP_EXPECTED_NAME` verifies the browser's logged-in account before any change; a mismatch refuses the run (F03).
+- When the tool starts Brave for a run, it now quits Brave when the run finishes, closing the debug port. A pre-existing browser is never quit. Opt out with `FB_PFP_KEEP_BRAVE_OPEN=1` (F04).
+- Screenshots are written mode `0600` and the state/screenshot directories mode `0700` (F10).
+
+### Fixed
+
+- A run now fails when the profile page still shows the previous avatar after Save; dialog closure alone no longer counts as success (F06).
+- Overlapping runs are serialized with a whole-run lock, so two runs can no longer pick the same image (F07).
+
+### Changed
+
+- `.gitignore` excludes the default image folder, root-level photos, `.env` and local state; CI rejects media outside `docs/assets/` (F05).
+- All six CI jobs (tests, security, text, package, hygiene) are required for merging (F08).
+- Dependency monitoring restored via Dependabot, plus a `pip-audit` advisory gate in CI (F09).
+- Actions updated to current major versions; PEP 639 license metadata (F11).
+- The `ImageSource` docstring no longer overpromises Facebook-hosted photo picking (F12).
+
 ## [1.0.1] - 2026-10-11
 
 ### Security

@@ -112,3 +112,10 @@ def test_default_state_is_per_user_not_cwd(monkeypatch: pytest.MonkeyPatch) -> N
     s = build_settings(_Args(dir=".", file=None))
     assert s.state_file == DEFAULT_DATA_DIR / "state.json"
     assert s.screenshot_dir == DEFAULT_DATA_DIR / "screenshots"
+
+
+def test_expected_name_env_reaches_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FB_PFP_EXPECTED_NAME", "Ada Lovelace")
+    assert build_settings(_Args(dir=".", file=None)).verify_account_name == "Ada Lovelace"
+    monkeypatch.delenv("FB_PFP_EXPECTED_NAME")
+    assert build_settings(_Args(dir=".", file=None)).verify_account_name is None
