@@ -46,6 +46,11 @@ class Settings:
 
     def validate(self) -> None:
         """Fail fast on unusable configuration."""
+        # Cheap, machine-independent checks first — port range and source_kind
+        # must be rejected even where the Brave paths below don't exist
+        # (e.g. Linux CI runners).
+        if not (1 <= self.debug_port <= 65535):
+            raise ValueError(f"debug_port out of range: {self.debug_port}")
         if self.source_kind == "file":
             if self.image_file is None:
                 raise ValueError("source_kind='file' requires image_file")
@@ -60,8 +65,6 @@ class Settings:
             raise ValueError(f"Unknown source_kind: {self.source_kind!r}")
         if not self.brave_binary.is_file():
             raise FileNotFoundError(f"Brave binary not found: {self.brave_binary}")
-        if not (1 <= self.debug_port <= 65535):
-            raise ValueError(f"debug_port out of range: {self.debug_port}")
 
 
 def _env_path(name: str) -> Path | None:

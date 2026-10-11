@@ -45,7 +45,14 @@ def test_validate_rejects_unknown_source_kind() -> None:
 
 
 def test_validate_rejects_bad_port(tmp_path: Path) -> None:
-    s = Settings(source_kind="directory", image_dir=tmp_path, debug_port=0)
+    fake_brave = tmp_path / "Brave"
+    fake_brave.write_text("#!/bin/sh\n")  # so filesystem checks pass; port must still fail
+    s = Settings(
+        source_kind="directory",
+        image_dir=tmp_path,
+        brave_binary=fake_brave,
+        debug_port=0,
+    )
     with pytest.raises(ValueError, match="debug_port"):
         s.validate()
 
