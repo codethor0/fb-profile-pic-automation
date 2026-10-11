@@ -1,0 +1,31 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste screenshots of your Facebook account, cookies or tokens.
+        Facebook changes its pages often. If the run stops at a missing button, say which step it reached.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you ran, what you expected, and what you got.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Run with `-v` and paste the log. Remove anything personal.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: "Output of `python3 fb_change_pfp.py --version`, plus your macOS version, Brave version and Python version."
+    validations:
+      required: true

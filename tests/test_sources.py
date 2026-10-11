@@ -1,7 +1,8 @@
-"""Unit tests for image sources. Fully offline — no browser required."""
+"""Unit tests for image sources. Fully offline, no browser required."""
 
 from __future__ import annotations
 
+import json
 import random
 from pathlib import Path
 
@@ -46,30 +47,85 @@ class TestDirectorySourceRandom:
             DirectorySource(tmp_path).pick()
 
 
+def _next(src: DirectorySource) -> Path:
+    """Pick, then record success, like a completed CLI run."""
+    image = src.pick()
+    src.record_success(image)
+    return image
+
+
 class TestDirectorySourceCycle:
     def test_no_repeats_until_all_used(self, img_dir: Path, tmp_path: Path) -> None:
-        state = tmp_path / "state.json"
-        rng = random.Random(42)
-        src = DirectorySource(img_dir, cycle=True, state_file=state, rng=rng)
-        picks = {src.pick().name for _ in range(3)}
-        assert picks == {"a.jpg", "b.png", "c.webp"}
+        src = DirectorySource(
+            img_dir, cycle=True, state_file=tmp_path / "state.json", rng=random.Random(42)
+        )
+        assert {_next(src).name for _ in range(3)} == {"a.jpg", "b.png", "c.webp"}
 
     def test_rotation_resets_after_full_cycle(self, img_dir: Path, tmp_path: Path) -> None:
-        state = tmp_path / "state.json"
-        rng = random.Random(7)
-        src = DirectorySource(img_dir, cycle=True, state_file=state, rng=rng)
-        first_round = [src.pick().name for _ in range(3)]
-        second_round = [src.pick().name for _ in range(3)]
-        assert sorted(first_round) == sorted(second_round) == ["a.jpg", "b.png", "c.webp"]
+        src = DirectorySource(
+            img_dir, cycle=True, state_file=tmp_path / "state.json", rng=random.Random(7)
+        )
+        first = [_next(src).name for _ in range(3)]
+        second = [_next(src).name for _ in range(3)]
+        assert sorted(first) == sorted(second) == ["a.jpg", "b.png", "c.webp"]
 
     def test_state_persists_across_instances(self, img_dir: Path, tmp_path: Path) -> None:
         state = tmp_path / "state.json"
         a = DirectorySource(img_dir, cycle=True, state_file=state, rng=random.Random(3))
         b = DirectorySource(img_dir, cycle=True, state_file=state, rng=random.Random(3))
-        assert a.pick().name != b.pick().name  # b avoids a's pick via state
+        assert _next(a).name != b.pick().name  # b avoids a's recorded pick
 
-    def test_corrupt_state_is_ignored(self, img_dir: Path, tmp_path: Path) -> None:
+    def test_pick_alone_does_not_consume_an_image(self, img_dir: Path, tmp_path: Path) -> None:
         state = tmp_path / "state.json"
-        state.write_text("{not json")
+        src = DirectorySource(img_dir, cycle=True, state_file=state, rng=random.Random(1))
+        src.pick()
+        assert not state.exists()  # failed run => nothing recorded
+
+    def test_record_success_is_noop_in_random_mode(self, img_dir: Path, tmp_path: Path) -> None:
+        state = tmp_path / "state.json"
+        src = DirectorySource(img_dir, state_file=state, rng=random.Random(1))
+        src.record_success(src.pick())
+        assert not state.exists()
+
+    def test_state_directory_is_created(self, img_dir: Path, tmp_path: Path) -> None:
+        state = tmp_path / "nested" / "dir" / "state.json"
+        src = DirectorySource(img_dir, cycle=True, state_file=state, rng=random.Random(1))
+        _next(src)
+        assert state.is_file()
+
+    @pytest.mark.parametrize(
+        "content", ["{not json", "[1, 2]", '{"used": 5}', '{"used": [1, 2]}', '"x"', ""]
+    )
+    def test_corrupt_or_malformed_state_is_ignored(
+        self, img_dir: Path, tmp_path: Path, content: str
+    ) -> None:
+        state = tmp_path / "state.json"
+        state.write_text(content)
         src = DirectorySource(img_dir, cycle=True, state_file=state, rng=random.Random(0))
-        assert src.pick().suffix in {".jpg", ".png", ".webp"}
+        assert _next(src).suffix in {".jpg", ".png", ".webp"}
+        assert json.loads(state.read_text())["used"]  # rewritten as valid state
+
+
+class TestDirectoryFiltering:
+    def test_skips_symlinks_and_directories(self, tmp_path: Path) -> None:
+        outside = tmp_path / "outside.txt"
+        outside.write_text("secret")
+        pics = tmp_path / "pics"
+        pics.mkdir()
+        (pics / "real.jpg").write_bytes(b"x")
+        (pics / "link.jpg").symlink_to(outside)
+        (pics / "folder.png").mkdir()
+        for seed in range(30):
+            assert DirectorySource(pics, rng=random.Random(seed)).pick().name == "real.jpg"
+
+    def test_unreadable_directory_raises_source_error(self, tmp_path: Path) -> None:
+        with pytest.raises(SourceError, match="Cannot read"):
+            DirectorySource(tmp_path / "missing").pick()
+
+    def test_hidden_appledouble_files_are_skipped(self, tmp_path: Path) -> None:
+        """F14: macOS AppleDouble "._*.jpg" files must never be picked."""
+        (tmp_path / "real.jpg").write_bytes(b"x")
+        (tmp_path / "._real.jpg").write_bytes(b"appledouble")
+        (tmp_path / ".hidden.png").write_bytes(b"x")
+        for seed in range(20):
+            assert DirectorySource(tmp_path, rng=random.Random(seed)).pick().name == "real.jpg"

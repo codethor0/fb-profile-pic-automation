@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" role="img" aria-labelledby="t">
+  <title id="t">fb-pfp: rotate your Facebook profile picture from your own browser</title>
+  <rect width="1280" height="640" fill="#0f172a"/>
+  <g transform="translate(120 192) scale(1.0)">
+    <rect width="256" height="256" rx="56" fill="#1e293b"/>
+    <circle cx="128" cy="128" r="58" fill="#e2e8f0"/>
+    <clipPath id="a"><circle cx="128" cy="128" r="58"/></clipPath>
+    <g clip-path="url(#a)" fill="#0f172a">
+      <circle cx="128" cy="110" r="22"/>
+      <ellipse cx="128" cy="184" rx="46" ry="40"/>
+    </g>
+    <g fill="none" stroke="#38bdf8" stroke-width="12" stroke-linecap="round">
+      <path d="M45.3 97.9 A88 88 0 0 1 210.7 97.9"/>
+      <path d="M210.7 158.1 A88 88 0 0 1 45.3 158.1"/>
+    </g>
+    <g fill="#38bdf8">
+      <polygon points="223.9,93.1 197.5,102.7 217,115"/>
+      <polygon points="32.1,162.9 58.5,153.3 39,141"/>
+    </g>
+  </g>
+  <text x="440" y="300" font-family="Helvetica, Arial, sans-serif" font-size="96" font-weight="700" fill="#f8fafc">fb-pfp</text>
+  <text x="440" y="372" font-family="Helvetica, Arial, sans-serif" font-size="40" fill="#cbd5e1">Rotate your Facebook profile picture</text>
+  <text x="440" y="424" font-family="Helvetica, Arial, sans-serif" font-size="40" fill="#cbd5e1">from your own logged-in Brave browser.</text>
+  <text x="440" y="500" font-family="Helvetica, Arial, sans-serif" font-size="30" fill="#38bdf8">Local only. No passwords. MIT licensed.</text>
+</svg>

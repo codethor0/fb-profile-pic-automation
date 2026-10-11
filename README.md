@@ -1,114 +1,146 @@
-# fb-profile-pic-automation
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="fb-pfp logo" width="120" height="120">
+</p>
 
-Auto-change your Facebook profile picture using your already-logged-in Brave browser.
+<h1 align="center">fb-pfp</h1>
 
-The tool drives Brave over the Chrome DevTools Protocol (localhost only), so it
-uses your real session — no passwords, no exported cookies, no headless browser.
+<p align="center">
+  Change your Facebook profile picture from a folder of images, using your own logged-in Brave browser.
+</p>
 
-## Why it's built this way
+<p align="center">
+  <a href="https://github.com/codethor0/fb-profile-pic-automation/actions/workflows/ci.yml"><img src="https://github.com/codethor0/fb-profile-pic-automation/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg" alt="Python 3.11, 3.12, 3.13">
+  <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg" alt="macOS">
+  <a href="https://github.com/codethor0/fb-profile-pic-automation/commits/main"><img src="https://img.shields.io/github/last-commit/codethor0/fb-profile-pic-automation.svg" alt="Last commit"></a>
+  <a href="SECURITY.md"><img src="https://img.shields.io/badge/security-policy-brightgreen.svg" alt="Security policy"></a>
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+  <a href="https://github.com/sponsors/codethor0"><img src="https://img.shields.io/badge/sponsor-GitHub-ea4aaa.svg" alt="Sponsor"></a>
+</p>
 
-- **Your browser, your login.** Attaching to Brave on `--remote-debugging-port=9222`
-  means Facebook sees the exact session you use every day.
-- **macOS-safe launch.** Brave is launched via LaunchServices (`open -na`), not as a
-  child process — a child inherits macOS TCC restrictions and cannot write the
-  browser profile (SingletonLock fails). If Brave is already open without the debug
-  port, it is quit gracefully (Cmd+Q equivalent, tabs restore on relaunch).
-- **Tight DOM scoping.** The file input is only ever touched *inside* the
-  "Choose profile picture" dialog — a page-wide `input[type=file]` on Facebook can
-  belong to the newsfeed post composer, and uploading there would attach your image
-  to a *post draft*.
-- **Text-pattern selectors.** Visible labels ("Choose profile picture", "Save"),
-  never generated class names, so Facebook A/B tests don't break it.
-- **Human-like pacing.** Every pause is randomized; timing never looks like a
-  fixed robot loop.
-- **English UI.** Brave is launched with `--lang=en-US` so Facebook renders English.
+## What it does
+
+`fb-pfp` opens a tab in the Brave browser you already use, goes to your Facebook profile, and uploads a picture from a folder as your new profile picture. You can pick a random image, rotate through the folder without repeats, or use one fixed file. One command, no prompts, so it can run on a schedule.
+
+It never sees your password. It drives the Brave window that is already logged in, over the Chrome DevTools Protocol on `localhost`.
+
+## Requirements
+
+- macOS
+- Brave Browser, installed in `/Applications` and logged in to Facebook
+- Python 3.11 or newer
+
+Linux and Windows are not supported. The Brave launch and quit steps use macOS tools (`open`, `osascript`).
 
 ## Install
 
 ```bash
-pip install -r requirements.txt   # playwright only; no browser download needed
+git clone https://github.com/codethor0/fb-profile-pic-automation.git
+cd fb-profile-pic-automation
+python3 -m venv .venv
+.venv/bin/pip install -e .
 ```
 
-Requires macOS with Brave at the default location (override with
-`FB_PFP_BRAVE_BINARY` / `FB_PFP_BRAVE_PROFILE`).
+Playwright is installed as a Python library only. It does not download a browser, because the tool uses your own Brave.
+
+## Quick start
+
+Put a few pictures (`.jpg`, `.jpeg`, `.png` or `.webp`) in a folder, then do a dry run. A dry run uploads the image into the Facebook dialog and stops before Save, so nothing is published:
+
+```bash
+.venv/bin/fb-pfp --dir ~/Pictures/profile-pics --dry-run -v
+```
+
+When that looks right, run it for real:
+
+```bash
+.venv/bin/fb-pfp --dir ~/Pictures/profile-pics
+```
+
+`python3 fb_change_pfp.py ...` works the same way if you prefer not to install the package.
 
 ## Usage
 
-```bash
-python3 fb_change_pfp.py --dir ~/Pictures/pfp            # pick an image at random
-python3 fb_change_pfp.py --dir ~/Pictures/pfp --cycle    # rotate, no repeats until all used
-python3 fb_change_pfp.py --file ~/Pictures/pfp/me.jpg    # one specific image
-python3 fb_change_pfp.py --dir ~/Pictures/pfp --dry-run  # upload but stop before Save
-python3 fb_change_pfp.py -v ...                          # debug logging
-```
+| Command | Effect |
+|---|---|
+| `fb-pfp --dir DIR` | Pick one image from `DIR` at random |
+| `fb-pfp --dir DIR --cycle` | Rotate through `DIR`, no repeats until every image has been used |
+| `fb-pfp --file FILE` | Use one specific image |
+| `fb-pfp ... --dry-run` | Upload but stop before Save |
+| `fb-pfp ... -v` | Debug logging, and screenshots of each step |
+| `fb-pfp --version` | Print the version |
 
-Or the one-command wrapper (uses `$PICS_DIR`, defaults to `~/Downloads`):
+Exit status is `0` on success and `1` on any reported failure, with a one-line reason in the output. `2` means the invocation itself was rejected (unknown flag, or `--dir` together with `--file`). Ctrl-C exits `130`.
 
-```bash
-./run.sh
-```
+Only regular files are used. Inside `--dir`, symbolic links, hidden files and sub-folders are ignored (`--file` follows links as usual).
 
-### Configuration
+In `--cycle` mode an image is marked as used only after Facebook accepted it. A failed run or a dry run does not use up an image.
 
-CLI args override `FB_PFP_*` environment variables, which override defaults:
+## Configuration
 
-| Env var | Meaning | Default |
+Command-line options override `FB_PFP_*` environment variables, which override the defaults.
+
+| Variable | Meaning | Default |
 |---|---|---|
-| `FB_PFP_DIR` | Candidate image directory | `./profile_pics` |
-| `FB_PFP_FILE` | Specific image file | — |
-| `FB_PFP_BRAVE_BINARY` | Brave executable | `/Applications/.../Brave Browser` |
-| `FB_PFP_BRAVE_PROFILE` | Brave profile dir | `~/Library/Application Support/BraveSoftware/Brave-Browser` |
-| `FB_PFP_DEBUG_PORT` | CDP port | `9222` |
-| `FB_PFP_LOCALE` | Browser/UI language | `en-US` |
-| `FB_PFP_STATE_FILE` | `--cycle` rotation state | `.fb_pfp_state.json` |
-| `FB_PFP_SCREENSHOT_DIR` | Debug screenshots | `.` |
+| `FB_PFP_DIR` | Folder of candidate images | `./profile_pics` |
+| `FB_PFP_FILE` | One specific image | none |
+| `FB_PFP_BRAVE_BINARY` | Brave executable | `/Applications/Brave Browser.app/Contents/MacOS/Brave Browser` |
+| `FB_PFP_BRAVE_PROFILE` | Brave profile folder | `~/Library/Application Support/BraveSoftware/Brave-Browser` |
+| `FB_PFP_DEBUG_PORT` | DevTools port | `9222` |
+| `FB_PFP_LOCALE` | Browser language, passed as `--lang` when this tool starts Brave | `en-US` |
+| `FB_PFP_STATE_FILE` | Rotation state for `--cycle` | `~/.fb_pfp/state.json` |
+| `FB_PFP_SCREENSHOT_DIR` | Where screenshots go | `~/.fb_pfp/screenshots` |
 
-## Scheduling
+`FB_PFP_PYTHON` is not read by `fb-pfp` itself: `run.sh` uses it to pick the Python interpreter (for example the one inside a virtual environment), defaulting to `python3`. See [docs/scheduling.md](docs/scheduling.md).
 
-Point `PICS_DIR` at a folder of pictures and schedule `run.sh` via cron or launchd.
-Caveat: if Brave is open without the debug port at run time, it restarts (graceful
-quit + session restore). Keeping Brave launched with the debug port avoids that:
+A value that cannot be used, such as a port that is not a number, stops the run with a clear message.
 
-```bash
-open -na "Brave Browser" --args --remote-debugging-port=9222 \
-  --user-data-dir="$HOME/Library/Application Support/BraveSoftware/Brave-Browser" \
-  --lang=en-US --no-first-run
-```
+## Run it on a schedule
 
-## Extending: new image sources
-
-The automator only asks an `ImageSource` for a path — where it comes from is
-pluggable. Implement one method:
-
-```python
-from fb_pfp import ImageSource
-
-class FacebookAlbumSource:
-    """Future idea: pick from photos already uploaded to Facebook
-    instead of uploading a new file."""
-
-    def pick(self) -> Path: ...
-```
-
-Local directory (random or no-repeat rotation) and single-file sources ship
-built-in. `DirectorySource` rotation state is written atomically (temp file +
-rename), so an interrupted run can never corrupt it.
-
-## Development
+`run.sh` is the one-command entry point. It requires `PICS_DIR` and has no default, because the image it picks becomes your public profile picture:
 
 ```bash
-pip install -r requirements-dev.txt
-python -m pytest        # fully offline — no browser needed
+PICS_DIR=~/Pictures/profile-pics ./run.sh
 ```
 
-Debug screenshots (`step1_loaded.png`, `step3_uploaded.png`, `after_save.png`,
-`failure_state.png`) land in `FB_PFP_SCREENSHOT_DIR`.
+[docs/scheduling.md](docs/scheduling.md) has a ready-made launchd setup and cron lines.
+
+If Brave is already running without the debug port, the tool quits it and starts it again with the port. Unsaved work in Brave windows can be lost, so close or save anything important before a scheduled run, or keep a dedicated Brave profile for this.
+
+## How it works
+
+1. Attach to Brave on `127.0.0.1:9222`, or start Brave with that port.
+2. Open a new tab at `facebook.com/me`.
+3. Click the profile picture, then "Choose profile picture".
+4. Give the image to the file input inside that dialog, and only that dialog.
+5. Click Save, wait for the dialog to close, and close the tab.
+
+Buttons are found by their visible text, not by generated class names. Pauses between steps vary between runs. Facebook changes its pages without notice, so a run can stop with "button not found" after a Facebook update. [docs/architecture.md](docs/architecture.md) describes the code layout and how to add a new image source.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md). Short version: the tool handles no credentials
-at all, and the debug port must stay localhost-only. Automating Facebook may
-violate Meta's ToS — provided for educational/personal use on accounts you own.
+- No passwords, cookies or tokens are read, stored or sent by this code.
+- The debug port listens on the loopback address (`127.0.0.1`) only.
+- An open debug port lets any program on your Mac control your browser. See [SECURITY.md](SECURITY.md) for what that means and how to limit it.
+
+Report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+
+## Terms of service
+
+Automating Facebook may break Meta's terms. Use this on an account you own, at your own risk. Meta can limit or disable accounts, and nothing in this project prevents that.
+
+## Disclaimer
+
+Not affiliated with, endorsed by, or sponsored by Meta Platforms, Inc. Facebook is a trademark of Meta Platforms, Inc.
+
+## Contributing
+
+Bug reports, fixes and documentation improvements are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first. The history of changes is in [CHANGELOG.md](CHANGELOG.md).
+
+## Support the project
+
+If this saves you time, you can sponsor the work through [GitHub Sponsors](https://github.com/sponsors/codethor0). Starring the repository also helps other people find it.
 
 ## License
 

@@ -5,10 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
@@ -26,4 +30,45 @@ jobs:
         run: python -m pytest tests/ -q
 
       - name: Byte-compile all sources
-        run: python -m compileall -q src fb_change_pfp.py
+        run: python -m compileall -q src scripts fb_change_pfp.py
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Static security scan (medium severity and above)
+        run: bandit -q -r src -ll
+
+  text:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Reject em dashes and en dashes
+        run: python scripts/check_text.py
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build the package
+        run: |
+          pip install build
+          python -m build

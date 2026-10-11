@@ -1,13 +1,12 @@
-"""fb_pfp — automate Facebook profile-picture changes via your own Brave browser.
+"""fb_pfp: change a Facebook profile picture through your own Brave browser.
 
 Public API:
-    Settings          — typed, env-overridable configuration
-    SingleFileSource  — image source that always returns one file
-    DirectorySource   — image source that picks randomly or rotates (cycle)
-    ImageSource       — protocol: implement this to add new sources
-                        (e.g. choosing from photos already on Facebook)
-    ensure_brave      — attach to / launch Brave with a debug port
-    FacebookPfpAutomator — the browser automation flow
+    Settings             typed configuration (CLI args, FB_PFP_* variables, defaults)
+    SingleFileSource     image source that always returns one file
+    DirectorySource      image source that picks at random or rotates through a folder
+    ImageSource          protocol to implement for a new kind of image source
+    ensure_brave         attach to Brave, launching it with a debug port if needed
+    FacebookPfpAutomator the browser automation flow
 """
 
 from .config import Settings
@@ -15,7 +14,7 @@ from .sources import DirectorySource, ImageSource, SingleFileSource
 from .browser import ensure_brave
 from .automator import AutomatorError, FacebookPfpAutomator
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 __all__ = [
     "Settings",

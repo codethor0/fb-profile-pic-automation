@@ -3,14 +3,14 @@ __pycache__/
 *.pyc
 .venv/
 .pytest_cache/
+build/
+dist/
+*.egg-info/
 
-# Runtime state / debug artifacts
-.fb_pfp_state.json
-step*.png
-dry_run_state.png
-after_save.png
-failure_state.png
-not_logged_in.png
+# Runtime state and debug output (screenshots show your Facebook page)
+*.lock
+*.png
+!docs/assets/social-preview.png
 
 # macOS
 .DS_Store

@@ -5,7 +5,7 @@ Precedence (lowest to highest):
     2. Environment variables (FB_PFP_*)
     3. Command-line arguments
 
-Nothing secret lives here — the only sensitive input is the browser profile
+Nothing secret lives here. The only sensitive input is the browser profile
 path, which stays on the local machine and is never transmitted anywhere.
 """
 
@@ -22,6 +22,11 @@ DEFAULT_BRAVE_PROFILE = (
     Path.home() / "Library/Application Support/BraveSoftware/Brave-Browser"
 )
 IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
+DEFAULT_DATA_DIR = Path.home() / ".fb_pfp"
+
+
+class ConfigError(ValueError):
+    """Raised when configuration (CLI args or FB_PFP_* variables) is unusable."""
 
 
 @dataclass(frozen=True)
@@ -37,16 +42,27 @@ class Settings:
     brave_profile: Path = DEFAULT_BRAVE_PROFILE
     debug_port: int = DEFAULT_PORT
     locale: str = DEFAULT_LOCALE
-    state_file: Path = field(default_factory=lambda: Path(".fb_pfp_state.json"))
-    screenshot_dir: Path = field(default_factory=lambda: Path("."))
+    state_file: Path = field(default_factory=lambda: DEFAULT_DATA_DIR / "state.json")
+    screenshot_dir: Path = field(default_factory=lambda: DEFAULT_DATA_DIR / "screenshots")
+    debug_screenshots: bool = False
 
     @property
     def cdp_url(self) -> str:
-        return f"http://localhost:{self.debug_port}"
+        """Local DevTools endpoint derived from ``debug_port`` (loopback only).
+
+        Uses 127.0.0.1 rather than ``localhost`` so a resolver preferring IPv6
+        cannot turn the connection into a refused ``::1`` connect.
+        """
+        return f"http://127.0.0.1:{self.debug_port}"
 
     def validate(self) -> None:
-        """Fail fast on unusable configuration."""
-        # Cheap, machine-independent checks first — port range and source_kind
+        """Fail fast on unusable configuration.
+
+        Raises:
+            ValueError: bad port or source_kind.
+            FileNotFoundError / NotADirectoryError: missing paths.
+        """
+        # Cheap, machine-independent checks first: port range and source_kind
         # must be rejected even where the Brave paths below don't exist
         # (e.g. Linux CI runners).
         if not (1 <= self.debug_port <= 65535):
@@ -68,20 +84,47 @@ class Settings:
 
 
 def _env_path(name: str) -> Path | None:
+    """Read an optional path from the environment, expanding ``~``."""
     raw = os.environ.get(name)
     return Path(raw).expanduser() if raw else None
 
 
-def build_settings(args: object) -> Settings:
-    """Merge defaults, environment variables, and parsed CLI args."""
-    source_kind = "file" if getattr(args, "file", None) else "directory"
+def _env_port() -> int:
+    """Read ``FB_PFP_DEBUG_PORT``; raise :class:`ConfigError` if not an integer."""
+    raw = os.environ.get("FB_PFP_DEBUG_PORT", str(DEFAULT_PORT))
+    try:
+        return int(raw)
+    except ValueError:
+        raise ConfigError(f"FB_PFP_DEBUG_PORT must be an integer, got {raw!r}") from None
 
-    image_dir = Path(args.dir).expanduser() if getattr(args, "dir", None) else _env_path("FB_PFP_DIR")
-    image_file = (
-        Path(args.file).expanduser() if getattr(args, "file", None) else _env_path("FB_PFP_FILE")
-    )
-    if image_dir is None and image_file is None:
-        image_dir = Path("./profile_pics")
+
+def build_settings(args: object) -> Settings:
+    """Merge defaults, environment variables, and parsed CLI args.
+
+    Raises:
+        ConfigError: a ``FB_PFP_*`` variable has an unusable value.
+    """
+    env_dir = _env_path("FB_PFP_DIR")
+    env_file = _env_path("FB_PFP_FILE")
+    if env_dir is not None and env_file is not None:
+        raise ConfigError("set only one of FB_PFP_DIR and FB_PFP_FILE")
+
+    cli_dir = Path(args.dir).expanduser() if getattr(args, "dir", None) else None
+    cli_file = Path(args.file).expanduser() if getattr(args, "file", None) else None
+
+    # Source selection order: CLI --file, CLI --dir, env FB_PFP_FILE,
+    # env FB_PFP_DIR, built-in default. Without this, FB_PFP_FILE alone
+    # left source_kind="directory" and the env file was silently ignored.
+    if cli_file is not None:
+        source_kind, image_dir, image_file = "file", None, cli_file
+    elif cli_dir is not None:
+        source_kind, image_dir, image_file = "directory", cli_dir, None
+    elif env_file is not None:
+        source_kind, image_dir, image_file = "file", None, env_file
+    elif env_dir is not None:
+        source_kind, image_dir, image_file = "directory", env_dir, None
+    else:
+        source_kind, image_dir, image_file = "directory", Path("./profile_pics"), None
 
     return Settings(
         source_kind=source_kind,
@@ -91,8 +134,9 @@ def build_settings(args: object) -> Settings:
         dry_run=bool(getattr(args, "dry_run", False)),
         brave_binary=_env_path("FB_PFP_BRAVE_BINARY") or DEFAULT_BRAVE_BINARY,
         brave_profile=_env_path("FB_PFP_BRAVE_PROFILE") or DEFAULT_BRAVE_PROFILE,
-        debug_port=int(os.environ.get("FB_PFP_DEBUG_PORT", DEFAULT_PORT)),
+        debug_port=_env_port(),
         locale=os.environ.get("FB_PFP_LOCALE", DEFAULT_LOCALE),
-        state_file=_env_path("FB_PFP_STATE_FILE") or Path(".fb_pfp_state.json"),
-        screenshot_dir=_env_path("FB_PFP_SCREENSHOT_DIR") or Path("."),
+        state_file=_env_path("FB_PFP_STATE_FILE") or DEFAULT_DATA_DIR / "state.json",
+        screenshot_dir=_env_path("FB_PFP_SCREENSHOT_DIR") or DEFAULT_DATA_DIR / "screenshots",
+        debug_screenshots=bool(getattr(args, "verbose", False)),
     )

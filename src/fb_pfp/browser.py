@@ -1,12 +1,12 @@
 """Attach to Brave via CDP, launching it with a debug port when necessary.
 
-Two hard-won platform details are handled here:
+Two platform details are handled here:
 
 1. macOS TCC: a child process of a script inherits the parent's file-access
    restrictions and cannot write Brave's profile directory (SingletonLock
    fails with "Operation not permitted"). Launching through LaunchServices
-   (``open -na``) gives Brave its own TCC identity, so the default profile —
-   and therefore the Facebook login — works.
+   (``open -na``) gives Brave its own TCC identity, so the default profile,
+   and therefore the Facebook login, works.
 2. A running Brave without the debug port: we ask it to quit gracefully
    (osascript, equivalent to Cmd+Q so session restore keeps tabs) and only
    escalate to SIGTERM if it ignores us.
@@ -32,15 +32,30 @@ class BrowserError(RuntimeError):
     """Raised when Brave cannot be made ready for automation."""
 
 
+def _app_name(binary: Path) -> str:
+    """Return the macOS app name (e.g. "Brave Browser") that owns ``binary``.
+
+    Falls back to "Brave Browser" when the binary is not inside a ``.app``.
+    """
+    for parent in binary.parents:
+        if parent.suffix == ".app":
+            return parent.stem
+    return "Brave Browser"
+
+
 def _cdp_alive(cdp_url: str) -> bool:
+    """True if a DevTools endpoint answers on the local ``cdp_url``."""
     try:
-        with urllib.request.urlopen(f"{cdp_url}/json/version", timeout=1) as resp:
+        # cdp_url is always http://127.0.0.1:<int port> (Settings.cdp_url).
+        with urllib.request.urlopen(f"{cdp_url}/json/version", timeout=1) as resp:  # nosec B310
             return resp.status == 200
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        logger.debug("No DevTools endpoint answering on %s: %s", cdp_url, exc)
         return False
 
 
 def _brave_running(binary: Path) -> bool:
+    """True if a process whose command line contains ``binary`` is running."""
     try:
         out = subprocess.run(
             ["pgrep", "-f", str(binary)],
@@ -49,14 +64,15 @@ def _brave_running(binary: Path) -> bool:
             check=False,
         )
         return bool(out.stdout.strip())
-    except OSError:
+    except OSError as exc:
+        logger.debug("pgrep unavailable: %s", exc)
         return False
 
 
 def _quit_brave_gracefully(binary: Path) -> None:
     """Ask Brave to quit (Cmd+Q equivalent), escalate only if it ignores us."""
     subprocess.run(
-        ["osascript", "-e", 'quit app "Brave Browser"'],
+        ["osascript", "-e", f'quit app "{_app_name(binary)}"'],
         capture_output=True,
         check=False,
     )
@@ -73,7 +89,7 @@ def _quit_brave_gracefully(binary: Path) -> None:
 
 def _launch_brave(settings: Settings) -> None:
     """Launch Brave with the debug port via LaunchServices (see module docstring)."""
-    subprocess.Popen(  # noqa: S603 — fixed argv list, no shell
+    subprocess.Popen(  # noqa: S603 (fixed argv list, no shell)
         [
             "open",
             "-na",
