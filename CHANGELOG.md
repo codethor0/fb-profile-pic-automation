@@ -2,6 +2,18 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org/).
 
+## [1.0.3] - 2026-10-12
+
+Fourth independent audit (14 findings); one HIGH fixed in this release.
+
+### Security
+
+- `ensure_brave` now verifies the identity of the browser answering the debug port before attaching. If the port is answered by anything other than Brave (for example Chrome started with its own debug port), the run aborts with a clear error instead of driving the wrong browser and possibly the wrong account (F1). Applies both when reusing an existing session and after launching Brave.
+
+### Tests
+
+- Added identity-check coverage for Brave, Chrome, Chromium, Edge and unknown version strings.
+
 ## [1.0.2] - 2026-10-11
 
 Third independent audit (12 findings); all resolved.

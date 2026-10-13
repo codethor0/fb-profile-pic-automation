@@ -14,7 +14,7 @@ from .sources import DirectorySource, ImageSource, SingleFileSource
 from .browser import ensure_brave
 from .automator import AutomatorError, FacebookPfpAutomator
 
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 
 __all__ = [
     "Settings",
