@@ -62,6 +62,11 @@ def _cdp_probe(cdp_url: str) -> str | None:
         return None
 
 
+def _is_brave(browser_string: str) -> bool:
+    """True if a DevTools ``Browser`` version string identifies Brave."""
+    return "brave" in browser_string.lower()
+
+
 def _cdp_alive(cdp_url: str) -> bool:
     """True if a DevTools endpoint answers on the local ``cdp_url``."""
     return _cdp_probe(cdp_url) is not None
@@ -133,6 +138,11 @@ def ensure_brave(settings: Settings) -> str:
     """
     answering = _cdp_probe(settings.cdp_url)
     if answering is not None:
+        if not _is_brave(answering):
+            raise BrowserError(
+                f"Port {settings.debug_port} is answered by {answering}, not Brave. "
+                "Close that browser or set FB_PFP_PORT to a free port, then retry."
+            )
         logger.info("Reusing existing debug session on port %d (%s)", settings.debug_port, answering)
         return "reused"
 
@@ -145,7 +155,13 @@ def ensure_brave(settings: Settings) -> str:
 
     deadline = time.monotonic() + _LAUNCH_TIMEOUT_S
     while time.monotonic() < deadline:
-        if _cdp_alive(settings.cdp_url):
+        answering = _cdp_probe(settings.cdp_url)
+        if answering is not None:
+            if not _is_brave(answering):
+                raise BrowserError(
+                    f"Port {settings.debug_port} is answered by {answering} instead of the "
+                    "Brave instance this run launched. Set FB_PFP_PORT to a free port, then retry."
+                )
             logger.info("Brave debug port is live")
             return "launched"
         time.sleep(0.5)
