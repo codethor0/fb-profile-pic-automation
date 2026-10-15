@@ -181,6 +181,9 @@ class DirectorySource:
         with self._locked():
             used = self._load_used() & names
             used.add(image.name)
-            if used >= names:  # rotation complete: start a fresh round
-                used = set()
+            if used >= names:
+                # Round complete: start a new one, but keep the image just
+                # saved marked as used so the new round cannot open by
+                # repeating it. With a single image there is no alternative.
+                used = {image.name} if len(names) > 1 else set()
             self._save_used(used)

@@ -66,8 +66,34 @@ class TestDirectorySourceCycle:
             img_dir, cycle=True, state_file=tmp_path / "state.json", rng=random.Random(7)
         )
         first = [_next(src).name for _ in range(3)]
-        second = [_next(src).name for _ in range(3)]
-        assert sorted(first) == sorted(second) == ["a.jpg", "b.png", "c.webp"]
+        assert sorted(first) == ["a.jpg", "b.png", "c.webp"]
+        # Later rounds keep rotating through every image without ever
+        # repeating the image just saved.
+        later = [_next(src).name for _ in range(9)]
+        assert set(later) == {"a.jpg", "b.png", "c.webp"}
+        sequence = first + later
+        assert all(x != y for x, y in zip(sequence, sequence[1:]))
+
+    def test_new_round_never_opens_with_the_image_just_saved(
+        self, img_dir: Path, tmp_path: Path
+    ) -> None:
+        for seed in range(40):
+            state = tmp_path / f"state-{seed}.json"
+            src = DirectorySource(
+                img_dir, cycle=True, state_file=state, rng=random.Random(seed)
+            )
+            last_of_round = [_next(src).name for _ in range(3)][-1]
+            assert src.pick().name != last_of_round
+
+    def test_single_image_still_repeats_and_resets(self, tmp_path: Path) -> None:
+        only = tmp_path / "pics"
+        only.mkdir()
+        (only / "one.jpg").write_bytes(b"\xff\xd8\xff")
+        src = DirectorySource(
+            only, cycle=True, state_file=tmp_path / "state.json", rng=random.Random(0)
+        )
+        assert _next(src).name == "one.jpg"
+        assert src.pick().name == "one.jpg"
 
     def test_state_persists_across_instances(self, img_dir: Path, tmp_path: Path) -> None:
         state = tmp_path / "state.json"

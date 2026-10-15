@@ -2,6 +2,12 @@
 
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `--cycle` no longer starts a new round with the image that was just saved. When the last unused image is saved the round resets but keeps that image marked as used, so with two or more images the next pick always differs (before, it repeated with probability 1/N, for example 33% with three images). A single image still repeats, as it must.
+
 ## [1.0.3] - 2026-10-12
 
 Fourth independent audit (14 findings); one HIGH fixed in this release.
