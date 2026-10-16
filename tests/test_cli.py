@@ -166,6 +166,21 @@ def test_overlapping_run_rejected_with_lock_held(
         os.close(fd)
 
 
+def test_state_dir_is_private_after_pick_only_run(
+    env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Audit finding CLI-1: even a run that never writes state leaves its
+    data directory owner-only (previously 0755 until _save_used chmod'ed)."""
+    import os
+    import stat
+
+    pics, state = env
+    monkeypatch.setattr(cli, "FacebookPfpAutomator", _OkAutomator)
+    assert cli.main(["--dir", str(pics)]) == 0
+    mode = stat.S_IMODE(os.stat(state.parent).st_mode)
+    assert mode == 0o700, oct(mode)
+
+
 def test_ensure_brave_shuts_down_only_what_it_launched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

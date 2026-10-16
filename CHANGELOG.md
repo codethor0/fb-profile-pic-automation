@@ -4,6 +4,11 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Security
+
+- The state directory is now created owner-only (`0700`) on every flow, including pick-only runs that never write rotation state (previously the mode was only fixed when state was saved). State and lock files reveal usage patterns.
+- The macOS app name derived from a custom `FB_PFP_BRAVE_BINARY` bundle path is validated before it is embedded in the AppleScript quit command; a crafted bundle name falls back to the default instead of reaching the script string.
+
 ## [1.0.3] - 2026-10-16
 
 Fourth independent audit (14 findings); one HIGH fixed in this release. Also fixes a rotation repeat bug found during final testing.

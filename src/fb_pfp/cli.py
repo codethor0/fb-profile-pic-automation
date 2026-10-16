@@ -20,6 +20,7 @@ from .sources import (
     RecordsSuccess,
     SingleFileSource,
     SourceError,
+    ensure_private_dir,
 )
 
 try:  # POSIX only; the tool targets macOS, other platforms skip locking
@@ -88,7 +89,7 @@ def _run_lock(state_file: Path) -> Iterator[None]:
     if fcntl is None:  # pragma: no cover - non-POSIX
         yield
         return
-    state_file.parent.mkdir(parents=True, exist_ok=True)
+    ensure_private_dir(state_file.parent)
     fd = os.open(state_file.with_name("run.lock"), os.O_CREAT | os.O_RDWR, 0o600)
     try:
         try:

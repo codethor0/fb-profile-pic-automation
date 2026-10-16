@@ -15,6 +15,7 @@ Two platform details are handled here:
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import time
 import urllib.request
@@ -35,11 +36,15 @@ class BrowserError(RuntimeError):
 def _app_name(binary: Path) -> str:
     """Return the macOS app name (e.g. "Brave Browser") that owns ``binary``.
 
-    Falls back to "Brave Browser" when the binary is not inside a ``.app``.
+    The name is embedded in an AppleScript string literal by
+    ``_quit_brave_gracefully``, so a crafted bundle name must never reach
+    that string: anything outside a conservative printable set falls back
+    to the default instead of risking AppleScript injection.
     """
     for parent in binary.parents:
         if parent.suffix == ".app":
-            return parent.stem
+            name = parent.stem
+            return name if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._-]*", name) else "Brave Browser"
     return "Brave Browser"
 
 
