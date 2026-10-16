@@ -4,21 +4,22 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
-### Fixed
+## [1.0.3] - 2026-10-16
 
-- `--cycle` no longer starts a new round with the image that was just saved. When the last unused image is saved the round resets but keeps that image marked as used, so with two or more images the next pick always differs (before, it repeated with probability 1/N, for example 33% with three images). A single image still repeats, as it must.
-
-## [1.0.3] - 2026-10-12
-
-Fourth independent audit (14 findings); one HIGH fixed in this release.
+Fourth independent audit (14 findings); one HIGH fixed in this release. Also fixes a rotation repeat bug found during final testing.
 
 ### Security
 
 - `ensure_brave` now verifies the identity of the browser answering the debug port before attaching. If the port is answered by anything other than Brave (for example Chrome started with its own debug port), the run aborts with a clear error instead of driving the wrong browser and possibly the wrong account (F1). Applies both when reusing an existing session and after launching Brave.
 
+### Fixed
+
+- `--cycle` no longer starts a new round with the image that was just saved. When the last unused image is saved the round resets but keeps that image marked as used, so with two or more images the next pick always differs (before, it repeated with probability 1/N, for example 33% with three images). A single image still repeats, as it must.
+
 ### Tests
 
 - Added identity-check coverage for Brave, Chrome, Chromium, Edge and unknown version strings.
+- Added rotation coverage for the round-reset case.
 
 ## [1.0.2] - 2026-10-11
 

@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/codethor0/fb-profile-pic-automation/actions/workflows/ci.yml"><img src="https://github.com/codethor0/fb-profile-pic-automation/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://github.com/codethor0/fb-profile-pic-automation/releases/latest"><img src="https://img.shields.io/github/v/release/codethor0/fb-profile-pic-automation.svg" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg" alt="Python 3.11, 3.12, 3.13">
   <img src="https://img.shields.io/badge/platform-macOS-lightgrey.svg" alt="macOS">
