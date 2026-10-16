@@ -16,6 +16,13 @@ def test_app_name_default_for_plain_binary() -> None:
     assert _app_name(Path("/usr/local/bin/brave")) == "Brave Browser"
 
 
+def test_app_name_rejects_crafted_bundle_name() -> None:
+    """Audit finding CLI-2: a crafted .app name must not reach the AppleScript literal."""
+    assert _app_name(Path('/Applications/Evil"Name.app/Contents/MacOS/x')) == "Brave Browser"
+    assert _app_name(Path("/Applications/Evil\\Name.app/Contents/MacOS/x")) == "Brave Browser"
+    assert _app_name(Path("/Applications/Evil;Name.app/Contents/MacOS/x")) == "Brave Browser"
+
+
 def test_cdp_alive_false_when_nothing_listens() -> None:
     """A closed loopback port is reported as dead, not as an exception."""
     assert _cdp_alive("http://127.0.0.1:1") is False

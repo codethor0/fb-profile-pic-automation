@@ -32,6 +32,20 @@ except ImportError:  # pragma: no cover - non-POSIX
 logger = logging.getLogger("fb_pfp")
 
 
+def ensure_private_dir(path: Path) -> None:
+    """Create ``path`` and keep it owner-only.
+
+    State files and lock files reveal usage patterns, so the directory must
+    be private even on flows that only pick an image and never write state
+    (audit finding CLI-1: the mode was only fixed inside ``_save_used``).
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 class SourceError(RuntimeError):
     """Raised when an image source cannot produce an image."""
 
@@ -132,11 +146,7 @@ class DirectorySource:
         """Write state atomically (temp file + fsync + rename) so a crash
         mid-write, or a power loss, cannot leave a torn JSON file behind."""
         parent = self._state_file.parent
-        parent.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(parent, 0o700)  # state names reveal usage patterns (F10)
-        except OSError:
-            pass
+        ensure_private_dir(parent)
         payload = json.dumps({"used": sorted(used)}).encode("utf-8")
         fd, tmp_name = tempfile.mkstemp(dir=str(parent), prefix=".fb_pfp_")
         try:
@@ -155,7 +165,7 @@ class DirectorySource:
         if fcntl is None:  # pragma: no cover - non-POSIX
             yield
             return
-        self._state_file.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_dir(self._state_file.parent)
         lock_path = self._state_file.with_name(self._state_file.name + ".lock")
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
