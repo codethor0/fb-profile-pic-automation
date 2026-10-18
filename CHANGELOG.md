@@ -6,6 +6,9 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Security
 
+- Dialog selection is name-first and fail-closed. The old locator matched any dialog whose *body text* mentioned "profile picture" and took the first in DOM order; an independent audit reproduced a "Create post" dialog (suggesting a profile-picture angle) capturing the upload and the synthetic Save. The new `_find_dialog` examines every visible dialog individually, requires a `profile picture` accessible name (unnamed shells still qualify via body text, but a dialog with a *different* name never does), requires exactly one candidate, and re-checks uniqueness immediately before Save. Zero or plural candidates abort the run.
+- Publishing now fails closed on an unverified account. `FB_PFP_EXPECTED_NAME` was optional: a run that clicks Save warned and continued without knowing which account it was changing. It is now required for every publishing run (`--dry-run` still only warns), and the refusal message names the fix.
+- Publishing now verifies the staged preview before Save. After the upload, the dialog's picture-sized preview is pixel-compared against the selected image inside the page (every pixel of a 32x32 reference, per-channel tolerance 24, at most 10 outlier pixels, mirroring the browser extension). A missing preview, an unreadable comparison, or a mismatch aborts before Save. `--dry-run` never reaches this check.
 - The state directory is now created owner-only (`0700`) on every flow, including pick-only runs that never write rotation state (previously the mode was only fixed when state was saved). State and lock files reveal usage patterns.
 - The macOS app name derived from a custom `FB_PFP_BRAVE_BINARY` bundle path is validated before it is embedded in the AppleScript quit command; a crafted bundle name falls back to the default instead of reaching the script string.
 

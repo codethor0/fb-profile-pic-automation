@@ -20,6 +20,7 @@ tests) work without the browser dependency installed.
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import random
@@ -43,11 +44,72 @@ PROFILE_URL = "https://www.facebook.com/me"
 AVATAR_NAME_PATTERN = re.compile(r"profile picture", re.IGNORECASE)
 MENU_ITEM_PATTERN = r"(choose|update) profile picture"
 UPLOAD_FALLBACK_PATTERN = r"upload photo|add photo|choose photo"
-# The dialog we drive must mention "profile picture"; unrelated dialogs
-# (cookie banners, notifications, the post composer) never match.
+# The dialog we drive must be *named* for profile pictures. A dialog that only
+# mentions "profile picture" in its body text (for example a "Create post"
+# composer suggesting a profile-picture angle) must never qualify: an audit
+# reproduction showed the old has_text filter picking that dialog and the
+# upload landing in a post draft. Identity is name-first and uniqueness is
+# required; anything ambiguous fails closed.
+DIALOG_NAME_PATTERN = re.compile(r"profile picture", re.IGNORECASE)
+# Fallback for unnamed dialog shells: truly unnamed (no aria-label at all) and
+# body text mentioning profile pictures. A dialog with a *different* name, such
+# as "Create post", is excluded by the name-first rule and never matches here.
 DIALOG_TEXT_PATTERN = re.compile(r"profile picture", re.IGNORECASE)
 SAVE_BUTTON_PATTERN = r"^save( changes)?$"
 NEXT_BUTTON_PATTERNS = [(r"^select photo$", "Select photo"), (r"^next$", "Next")]
+
+# Pixel comparison of the staged preview against the selected image, executed
+# inside the page so no image library is required. Mirrors the extension's
+# verification: every pixel of a 32x32 reference, per-channel tolerance 24,
+# at most 10 outlier pixels so CDN recompression still verifies. The local
+# image bytes arrive chunked on window.__fbpfp_img (see _verify_staged_preview).
+_PREVIEW_TOLERANCE = 24
+_PREVIEW_MAX_OUTLIERS = 10
+_COMPARE_JS = r"""
+async ({staged}) => {
+  const b64 = (window.__fbpfp_img || []).join('');
+  delete window.__fbpfp_img;
+  if (!b64) return {ok: false, reason: 'no-local-bytes'};
+  let local;
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    local = await createImageBitmap(new Blob([bytes]));
+  } catch (e) { return {ok: false, reason: 'local-decode'}; }
+  const sample = (drawable, crop) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 32;
+    const ctx = c.getContext('2d');
+    if (crop) ctx.drawImage(drawable, crop.x, crop.y, crop.size, crop.size, 0, 0, 32, 32);
+    else ctx.drawImage(drawable, 0, 0, 32, 32);
+    return [...ctx.getImageData(0, 0, 32, 32).data];
+  };
+  const variants = [sample(local)];
+  const size = Math.min(local.width, local.height);
+  if (size > 0) {
+    variants.push(sample(local, {x: (local.width - size) / 2, y: (local.height - size) / 2, size}));
+  }
+  local.close();
+  let stagedSamples;
+  try {
+    const blob = staged.startsWith('blob:') || staged.startsWith('data:')
+      ? await (await fetch(staged)).blob()
+      : await (await fetch(staged, {credentials: 'omit', mode: 'cors'})).blob();
+    const bitmap = await createImageBitmap(blob);
+    stagedSamples = sample(bitmap);
+    bitmap.close();
+  } catch (e) { return {ok: false, reason: 'staged-unreadable'}; }
+  for (const expected of variants) {
+    let outliers = 0;
+    for (let p = 0; p < expected.length; p += 4) {
+      for (let ch = 0; ch < 3; ch++) {
+        if (Math.abs(stagedSamples[p + ch] - expected[p + ch]) > 24) { outliers++; break; }
+      }
+    }
+    if (outliers <= 10) return {ok: true, outliers};
+  }
+  return {ok: false, reason: 'mismatch'};
+}
+"""
 
 
 class AutomatorError(RuntimeError):
@@ -147,10 +209,83 @@ class FacebookPfpAutomator:
         self._shot(page, "failure_state.png", force=True)
         return AutomatorError(message)
 
-    @staticmethod
-    def _dialog(page: "Page") -> "Locator":
-        """The profile-picture dialog (never an unrelated dialog or the composer)."""
-        return page.get_by_role("dialog").filter(has_text=DIALOG_TEXT_PATTERN).first
+    def _dialog_candidates(self, page: "Page") -> list["Locator"]:
+        """Visible dialogs that could be the profile-picture dialog.
+
+        Audit finding: the old ``.filter(has_text=...).first`` locator matched
+        a "Create post" dialog that merely mentioned "profile picture" in its
+        body, and ``.first`` picked whichever dialog came first in DOM order.
+        Selection is therefore name-first, unnamed-shell-second, and each
+        candidate is examined individually: a dialog carrying a *different*
+        accessible name (cookie banner, "Create post") can never qualify.
+        """
+        root = page.locator("body")
+        dialogs = root.locator("[role='dialog'], dialog")
+        candidates: list["Locator"] = []
+        try:
+            count = dialogs.count()
+        except Exception as exc:
+            logger.debug("Dialog listing failed: %s", exc)
+            return candidates
+        for index in range(count):
+            dialog = dialogs.nth(index)
+            try:
+                if not dialog.is_visible(timeout=300):
+                    continue
+                name = (dialog.get_attribute("aria-label") or "").strip()
+                if DIALOG_NAME_PATTERN.search(name):
+                    candidates.append(dialog)
+                elif not name:
+                    text = dialog.inner_text() or ""
+                    if DIALOG_TEXT_PATTERN.search(text):
+                        candidates.append(dialog)
+                # A dialog with a different non-empty name is never a candidate.
+            except Exception as exc:
+                logger.debug("Dialog candidate %d unreadable, skipped: %s", index, exc)
+        return candidates
+
+    def _find_dialog(self, page: "Page", timeout_ms: int = 10_000) -> "Locator":
+        """Wait for the *unique* profile-picture dialog, or fail closed.
+
+        Zero candidates keeps polling until the deadline. More than one, at any
+        moment, raises immediately: picking the first of two plausible dialogs
+        is exactly the failure this replaces.
+        """
+        deadline = time.monotonic() + timeout_ms / 1000
+        seen = 0
+        while time.monotonic() < deadline:
+            candidates = self._dialog_candidates(page)
+            seen = max(seen, len(candidates))
+            if len(candidates) > 1:
+                raise self._fail(
+                    page,
+                    f"Found {len(candidates)} dialogs that could be the profile-picture "
+                    "dialog; refusing to guess which one to drive.",
+                )
+            if len(candidates) == 1:
+                return candidates[0]
+            page.wait_for_timeout(400)
+        raise self._fail(
+            page,
+            f"The profile-picture dialog did not open within {timeout_ms // 1000}s; "
+            f"at most {seen} candidate dialog(s) appeared.",
+        )
+
+    def _assert_dialog_still_unique(self, page: "Page", dialog: "Locator") -> None:
+        """Re-verify identity right before Save: one candidate, still attached."""
+        candidates = self._dialog_candidates(page)
+        if len(candidates) != 1:
+            raise self._fail(
+                page,
+                f"Expected exactly one profile-picture dialog before Save, found "
+                f"{len(candidates)}; refusing to guess.",
+            )
+        try:
+            visible = dialog.is_visible(timeout=500)
+        except Exception as exc:
+            raise self._fail(page, f"Could not re-verify the dialog before Save: {exc}") from exc
+        if not visible:
+            raise self._fail(page, "The profile-picture dialog changed before Save; refusing to continue.")
 
     # -- main flow ----------------------------------------------------------
 
@@ -181,6 +316,7 @@ class FacebookPfpAutomator:
                     logger.info("--dry-run: stopping before Save")
                     return
                 before_src = self._avatar_src(page)
+                self._verify_staged_preview(page, dialog, image)
                 self._save(page, dialog)
                 self._confirm(page, dialog)
                 self._verify_picture_changed(page, before_src)
@@ -213,7 +349,9 @@ class FacebookPfpAutomator:
         Audit finding F03: an open debug port does not prove *which* browser or
         account we are about to change. When ``FB_PFP_EXPECTED_NAME`` is set,
         the profile page title must contain it (Facebook titles read
-        "Name | Facebook"). When unset, we warn and continue.
+        "Name | Facebook"). A later audit finding tightened this: the check is
+        optional only for ``--dry-run``. A run that will click Save must know
+        the account, so a missing name is a hard failure there.
         """
         expected = self._settings.verify_account_name
         try:
@@ -221,11 +359,18 @@ class FacebookPfpAutomator:
         except Exception as exc:
             raise self._fail(page, f"Could not read the profile page title: {exc}") from exc
         if not expected:
-            logger.warning(
-                "FB_PFP_EXPECTED_NAME is not set; this run cannot verify which "
-                "Facebook account the browser is logged into."
+            if self._settings.dry_run:
+                logger.warning(
+                    "FB_PFP_EXPECTED_NAME is not set; this dry run cannot verify which "
+                    "Facebook account the browser is logged into."
+                )
+                return
+            raise self._fail(
+                page,
+                "FB_PFP_EXPECTED_NAME is not set. A run that clicks Save must verify "
+                "the account first: set FB_PFP_EXPECTED_NAME to the exact profile name, "
+                "or pass --dry-run to stage without publishing.",
             )
-            return
         if expected.casefold() not in title.casefold():
             self._shot(page, "wrong_account.png", force=True)
             raise AutomatorError(
@@ -304,11 +449,8 @@ class FacebookPfpAutomator:
         self._pause(page, 2200)
         self._shot(page, "step2_dialog.png")
 
-        dialog = self._dialog(page)
-        try:
-            dialog.wait_for(state="visible", timeout=10_000)
-        except Exception as exc:
-            raise self._fail(page, f"The profile-picture dialog did not open: {exc}") from exc
+        dialog = self._find_dialog(page)
+        self._shot(page, "step2_dialog.png")
         return dialog
 
     def _upload(self, page: "Page", dialog: "Locator", image: Path) -> None:
@@ -333,8 +475,76 @@ class FacebookPfpAutomator:
         self._pause(page, 3800)
         self._shot(page, "step3_uploaded.png")
 
+    @staticmethod
+    def _preview_src(dialog: "Locator") -> str | None:
+        """The staged preview inside the dialog: largest picture-sized img."""
+        try:
+            return dialog.evaluate(
+                """(dialog) => {
+                  const visible = el => {
+                    const b = el.getBoundingClientRect();
+                    const s = getComputedStyle(el);
+                    return b.width > 0 && b.height > 0 && s.visibility !== 'hidden' && s.display !== 'none';
+                  };
+                  const imgs = [...dialog.querySelectorAll('img')]
+                    .filter(el => visible(el) && el.naturalWidth > 0)
+                    .map(el => ({el, box: el.getBoundingClientRect()}))
+                    .filter(({box}) => box.width >= 80 && box.height >= 80)
+                    .sort((a, b) => b.box.width * b.box.height - a.box.width * a.box.height);
+                  return imgs.length ? (imgs[0].el.currentSrc || imgs[0].el.src || null) : null;
+                }"""
+            )
+        except Exception as exc:
+            logger.debug("Could not read the staged preview src: %s", exc)
+            return None
+
+    def _verify_staged_preview(self, page: "Page", dialog: "Locator", image: Path) -> None:
+        """Pixel-compare the dialog's staged preview with the selected image.
+
+        Audit finding: the CLI Save path did not independently confirm the
+        staged image matches the selected one, so a wrong or stale preview
+        could be published silently. The comparison runs inside the page
+        (no image library needed) over every pixel of a 32x32 reference with
+        the same tolerance the browser extension uses, and a publishing run
+        fails closed when verification is impossible. ``--dry-run`` never
+        reaches this: it stops before Save.
+        """
+        src = self._preview_src(dialog)
+        if not src:
+            raise self._fail(
+                page,
+                "No picture-sized preview appeared inside the dialog; refusing to "
+                "Save without verifying the staged image.",
+            )
+        try:
+            encoded = base64.b64encode(image.read_bytes()).decode("ascii")
+        except OSError as exc:
+            raise self._fail(page, f"Could not read the selected image for verification: {exc}") from exc
+        page.evaluate("() => { window.__fbpfp_img = []; }")
+        try:
+            chunk_size = 512 * 1024
+            for offset in range(0, len(encoded), chunk_size):
+                page.evaluate("(part) => window.__fbpfp_img.push(part)", encoded[offset:offset + chunk_size])
+            verdict = page.evaluate(_COMPARE_JS, {"staged": src})
+        except Exception as exc:
+            raise self._fail(page, f"Could not compare the staged preview with the selected image: {exc}") from exc
+        finally:
+            page.evaluate("() => { delete window.__fbpfp_img; }")
+        if not verdict or not verdict.get("ok"):
+            reason = (verdict or {}).get("reason", "no-verdict")
+            raise self._fail(
+                page,
+                f"The staged preview does not verify against the selected image ({reason}); "
+                "refusing to Save.",
+            )
+        logger.info(
+            "Verified the staged preview matches the selected image (%s outlier pixels)",
+            verdict.get("outliers"),
+        )
+
     def _save(self, page: "Page", dialog: "Locator") -> None:
         """Click Save inside the dialog, passing any intermediate Next step."""
+        self._assert_dialog_still_unique(page, dialog)
         rx = re.compile(SAVE_BUTTON_PATTERN, re.IGNORECASE)
         save_btn = dialog.get_by_role("button", name=rx).first
 

@@ -160,12 +160,23 @@ def test_account_refused_when_title_shows_other_account(tmp_path: Path) -> None:
         a._verify_account(page)  # type: ignore[arg-type]
 
 
-def test_account_check_skipped_without_expected_name(
+def test_account_check_skipped_without_expected_name_in_dry_run(
     tmp_path: Path, caplog: pytest.LogCaptureFixture[str]
 ) -> None:
-    a = FacebookPfpAutomator(_settings(tmp_path))
+    a = FacebookPfpAutomator(_settings(tmp_path, dry_run=True))
     a._verify_account(_TitledPage("Anyone | Facebook"))  # type: ignore[arg-type]
     assert "cannot verify" in caplog.text
+
+
+def test_account_check_refuses_publish_without_expected_name(tmp_path: Path) -> None:
+    """Audit finding: publishing without verifying the account is a hard stop."""
+    import pytest
+
+    from fb_pfp.automator import AutomatorError
+
+    a = FacebookPfpAutomator(_settings(tmp_path, dry_run=False))
+    with pytest.raises(AutomatorError, match="FB_PFP_EXPECTED_NAME is not set"):
+        a._verify_account(_TitledPage("Anyone | Facebook"))  # type: ignore[arg-type]
 
 
 def test_normalize_src_strips_query_string() -> None:
