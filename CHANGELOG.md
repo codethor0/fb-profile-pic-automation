@@ -4,6 +4,10 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-18
+
+Fifth independent audit (three publishing-safety findings); all fixed in this release. The v1.0.3 tag predates the rotation fix and the state-directory hardening; this release restores tag-to-code integrity.
+
 ### Security
 
 - Dialog selection is name-first and fail-closed. The old locator matched any dialog whose *body text* mentioned "profile picture" and took the first in DOM order; an independent audit reproduced a "Create post" dialog (suggesting a profile-picture angle) capturing the upload and the synthetic Save. The new `_find_dialog` examines every visible dialog individually, requires a `profile picture` accessible name (unnamed shells still qualify via body text, but a dialog with a *different* name never does), requires exactly one candidate, and re-checks uniqueness immediately before Save. Zero or plural candidates abort the run.
